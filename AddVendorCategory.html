@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+</head>
+
+<body>
+
+  <label for="category">Vendor Category</label>
+  <br><br>
+
+  <select id="category"></select>
+
+  <br><br>
+
+  <button onclick="google.script.host.close()">
+    Cancel
+  </button>
+
+  <button id="addButton" onclick="addCategory()">
+    Add
+  </button>
+
+  <script>
+
+    google.script.run
+      .withSuccessHandler(loadCategories)
+      .getVendorCategories();
+
+    function loadCategories(categories) {
+
+      const select = document.getElementById("category");
+
+      categories.forEach(category => {
+
+        const option = document.createElement("option");
+        option.value = category;
+        option.textContent = category;
+
+        select.appendChild(option);
+
+      });
+
+    }
+
+    function addCategory() {
+
+      const button = document.getElementById("addButton");
+
+      button.disabled = true;
+
+      const category =
+        document.getElementById("category").value;
+
+      google.script.run
+        .withSuccessHandler(google.script.host.close)
+        .withFailureHandler(function(error) {
+          button.disabled = false;
+          alert(error.message);
+        })
+        .appendBlock(category);
+
+    }
+
+  </script>
+
+</body>
+</html>

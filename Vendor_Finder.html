@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<base target="_top">
+
+<style>
+
+body{
+    font-family:Arial,sans-serif;
+    padding:15px;
+}
+
+input,
+select{
+    width:100%;
+    padding:10px;
+    box-sizing:border-box;
+    margin-bottom:10px;
+}
+
+.vendor{
+    border:1px solid #ddd;
+    border-radius:8px;
+    padding:10px;
+    margin-bottom:10px;
+}
+
+.name{
+    font-weight:bold;
+    font-size:15px;
+}
+
+.location{
+    margin-top:6px;
+    color:#555;
+}
+
+.summary{
+    cursor:pointer;
+}
+
+.summary:hover{
+    background:#f8f9fa;
+}
+
+.details{
+    display:none;
+    margin-top:10px;
+}
+
+.toggle{
+    color:#1a73e8;
+    font-weight:bold;
+    margin-top:10px;
+}
+
+#status{
+    min-height:18px;
+    margin-bottom:8px;
+    font-size:13px;
+    font-weight:bold;
+}
+
+.success{
+    color:#188038;
+}
+
+.error{
+    color:#d93025;
+}
+
+button:disabled{
+    opacity:0.5;
+    cursor:not-allowed;
+}
+
+.added{
+    background:#e6f4ea;
+    color:#188038;
+    border:1px solid #188038;
+}
+
+.filters{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:8px;
+    margin-bottom:10px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h2>Vendor Finder</h2>
+
+<div id="status"></div>
+
+<div id="context" style="
+    margin-bottom:12px;
+    font-size:13px;
+    color:#666;
+">
+Loading...
+</div>
+
+<input
+    id="search"
+    placeholder="Search vendors..."
+>
+
+<div class="filters">
+
+    <select id="type">
+        <option value="">All Types</option>
+    </select>
+
+    <select id="country">
+        <option value="">All Countries</option>
+    </select>
+
+    <select id="city">
+        <option value="">All Cities</option>
+    </select>
+
+</div>
+
+
+<div id="results">
+
+Loading...
+
+</div>
+
+<script>
+
+let vendors = [];
+let filters = {};
+let canAdd = false;
+let currentRow = null;
+let currentBlockType = "";
+
+const searchBox = document.getElementById("search");
+const results = document.getElementById("results");
+const context = document.getElementById("context");
+const status = document.getElementById("status");
+
+refreshContext();
+
+function refreshContext(){
+
+    google.script.run
+    .withSuccessHandler(function(data){
+
+        currentRow = data.row;
+        canAdd = data.canAdd;
+
+        const previousBlockType = currentBlockType;
+        currentBlockType = data.blockType || "";
+
+        const typeSelect = document.getElementById("type");
+
+        if (currentBlockType === "other") {
+
+            typeSelect.disabled = false;
+
+        } else if (currentBlockType) {
+
+            typeSelect.value =
+                currentBlockType.charAt(0).toUpperCase() +
+                currentBlockType.slice(1);
+
+            typeSelect.disabled = true;
+
+        } else {
+
+            typeSelect.value = "";
+            typeSelect.disabled = false;
+
+        }
+
+        if (previousBlockType !== currentBlockType) {
+            applyFilters();
+        }
+
+        if(!data.valid){
+
+            context.innerHTML =
+                `⚠ Select a vendor row first.`;
+
+        }else if(!data.canAdd){
+
+            context.innerHTML =
+                `⚠ Row ${data.row} already contains a vendor.<br>Select an empty row.`;
+
+        }else{
+
+            context.innerHTML =
+                `📍 ${data.sheet} • Row ${data.row}`;
+
+        }
+
+    })
+    .getCurrentContext();
+
+}
+
+setInterval(refreshContext,2000);
+
+google.script.run
+.withSuccessHandler(function(data){
+
+    vendors = data;
+
+    google.script.run
+    .withSuccessHandler(loadFilters)
+    .getVendorFilters();
+
+})
+.withFailureHandler(function(err){
+
+    results.innerHTML = "ERROR: " + err.message;
+
+})
+.getVendorSearch();
+
+function loadFilters(data){
+
+    filters = data;
+
+    fillDropdown("type", data.types);
+    fillDropdown("country", data.countries);
+    fillDropdown("city", data.cities);
+
+    if (currentBlockType === "other") {
+
+        document.getElementById("type").disabled = false;
+
+    } else if (currentBlockType) {
+
+        document.getElementById("type").value =
+            currentBlockType.charAt(0).toUpperCase() +
+            currentBlockType.slice(1);
+
+        document.getElementById("type").disabled = true;
+
+    }
+
+    applyFilters();
+
+}
+
+function fillDropdown(id, values){
+
+    const select = document.getElementById(id);
+
+    values.forEach(value => {
+
+        const option = document.createElement("option");
+
+        option.value = value;
+        option.textContent = value;
+
+        select.appendChild(option);
+
+    });
+
+}
+
+function updateCityDropdown(){
+
+    const country =
+        document.getElementById("country").value;
+
+    const city =
+        document.getElementById("city");
+
+    city.innerHTML =
+        '<option value="">All Cities</option>';
+
+    city.selectedIndex = 0;
+
+    let cities;
+
+    if(country){
+
+        cities = filters.countryCities[country] || [];
+
+    }else{
+
+        cities = filters.cities;
+
+    }
+    cities.forEach(name => {
+
+        const option =
+            document.createElement("option");
+
+        option.value = name;
+        option.textContent = name;
+
+        city.appendChild(option);
+
+    });
+
+}
+
+searchBox.addEventListener("input", applyFilters);
+
+document.getElementById("type")
+    .addEventListener("change", applyFilters);
+
+document.getElementById("country")
+    .addEventListener("change", function(){
+
+        updateCityDropdown();
+        applyFilters();
+
+    });
+
+document.getElementById("city")
+    .addEventListener("change", applyFilters);
+
+function applyFilters(){
+
+  if (
+      searchBox.value.trim() === "" &&
+      !document.getElementById("type").value &&
+      !document.getElementById("country").value &&
+      !document.getElementById("city").value
+  ) {
+
+      render(vendors.slice(0,20));
+
+      context.innerHTML =
+          `Showing first 20 of ${vendors.length} vendors`;
+
+      return;
+
+  }
+
+    const query =
+        searchBox.value.trim().toLowerCase();
+
+    const type =
+        document.getElementById("type").value;
+
+    const country =
+        document.getElementById("country").value;
+
+    const city =
+        document.getElementById("city").value;
+
+    const matches = vendors.filter(v => {
+
+        const textMatch =
+
+            query === "" ||
+
+            (v.name || "").toLowerCase().includes(query) ||
+
+            (v.type || "").toLowerCase().includes(query) ||
+
+            v.coverage.some(c =>
+
+                (c.country || "").toLowerCase().includes(query) ||
+
+                (c.city || "").toLowerCase().includes(query)
+
+            );
+
+        const typeMatch =
+            !type ||
+            getVendorTypes(v.type).includes(type);
+
+        const countryMatch =
+            !country ||
+            v.coverage.some(c => c.country === country);
+
+        const cityMatch =
+            !city ||
+            v.coverage.some(c => c.city === city);
+
+        return (
+            textMatch &&
+            typeMatch &&
+            countryMatch &&
+            cityMatch
+        );
+
+    });
+
+    render(matches);
+
+    context.innerHTML =
+        `Found ${matches.length} vendor${matches.length === 1 ? "" : "s"}`;
+
+}
+
+function render(list){
+
+    list.sort((a, b) =>
+        (b.selected || 0) - (a.selected || 0) ||
+        (b.evaluated || 0) - (a.evaluated || 0)
+    );
+
+    if(list.length===0){
+
+        results.innerHTML =
+            "<p>No vendors found.</p>";
+
+        return;
+
+    }
+
+    results.innerHTML = list.map((v,index)=>`
+
+<div class="vendor">
+
+    <div
+        class="summary"
+        onclick="toggle(${index})"
+    >
+
+        <div class="name">
+
+            <span id="arrow-${index}">
+                ▶
+            </span>
+
+            ${v.name}
+
+        </div>
+
+        <div>${v.type}</div>
+
+        ${v.coverage.map(c=>`
+
+            <div class="location">
+
+                📍 ${c.city}, ${c.country}
+                (${c.evaluated} evaluated, ${c.selected} selected)
+
+            </div>
+
+        `).join("")}
+
+        ${v.eventBlocks.length
+            ? `<div style="color:#188038;margin-top:6px;">
+                ✓ Already added: ${v.eventBlocks.join(", ")}
+            </div>`
+            : ""
+        }
+
+        <div
+            id="more-${index}"
+            class="toggle"
+        >
+
+            More
+
+        </div>
+
+    </div>
+
+    <div
+        id="details-${index}"
+        class="details"
+    >
+
+        <hr>
+
+        ${v.contact ? `👤 ${v.contact}<br><br>` : ""}
+
+        ${v.email ? `✉ ${v.email}<br><br>` : ""}
+
+        ${v.website ? `
+
+        <a
+            href="https://${v.website}"
+            target="_blank"
+            onclick="event.stopPropagation();"
+        >
+
+            🌐 Website
+
+        </a>
+
+        <br><br>
+
+        ` : ""}
+        ${v.portfolio ? `
+
+        <a
+            href="${v.portfolio}"
+            target="_blank"
+            onclick="event.stopPropagation();"
+        >
+
+            📁 Portfolio
+
+        </a>
+
+        <br><br>
+
+        ` : ""}
+
+        <button
+            class="addVendorBtn"
+            ${v.eventBlocks.length ? "disabled" : ""}
+            onclick="event.stopPropagation(); addVendor('${v.name}')"
+        >
+
+            ${v.eventBlocks.length
+                ? `✓ Already added: ${v.eventBlocks.join(", ")}`
+                : "➕ Use Vendor"
+            }
+
+        </button>
+
+    </div>
+
+</div>
+
+`).join("");
+
+}
+
+function toggle(index){
+
+    const details =
+        document.getElementById(`details-${index}`);
+
+    const arrow =
+        document.getElementById(`arrow-${index}`);
+
+    const more =
+        document.getElementById(`more-${index}`);
+
+    if(details.style.display==="block"){
+
+        details.style.display="none";
+        arrow.textContent="▶";
+        more.textContent="More";
+
+    }else{
+
+        details.style.display="block";
+        arrow.textContent="▼";
+        more.textContent="Less";
+
+    }
+
+}
+
+function showStatus(message,type){
+
+    status.className = type;
+    status.textContent = message;
+
+    setTimeout(function(){
+
+        status.textContent = "";
+        status.className = "";
+
+    },2000);
+
+}
+
+function addVendor(name){
+
+    if(!canAdd){
+        return;
+    }
+
+    google.script.run
+        .withSuccessHandler(function(){
+
+            google.script.run
+                .withSuccessHandler(function(data){
+
+                    vendors = data;
+
+                    applyFilters();
+
+                    refreshContext();
+
+                    showStatus(
+                        `✅ ${name} added.`,
+                        "success"
+                    );
+
+                })
+                .getVendorSearch();
+
+        })
+        .withFailureHandler(function(err){
+
+            showStatus(
+                `❌ ${err.message}`,
+                "error"
+            );
+
+        })
+        .addVendorToCurrentRow(name);
+
+}
+
+function getVendorTypes(typeString){
+
+    return String(typeString || "")
+        .split(";")
+        .map(type => type.trim())
+        .filter(type => type !== "");
+
+}
+
+</script>
+
+</body>
+
+</html>
